@@ -1,1 +1,48 @@
+name: Build Windows EXE
 
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+      - name: Verify model manifest and FFmpeg runtime
+        run: python -c "import cv2; from src.models import MODELS; from src.video_engine import find_ffmpeg; assert set(MODELS) == {2, 4}; assert hasattr(cv2, 'dnn_superres'); assert find_ffmpeg(); print('OpenCV DNN Super Resolution OK; FFmpeg:', find_ffmpeg())"
+      - name: Run tests
+        run: python -m pytest -q
+      - name: Build Windows application
+        run: pyinstaller --clean --noconfirm Dafan4KEnhancer.spec
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'dist/Dafan4KEnhancer/Dafan4KEnhancer.exe')) { throw 'PyInstaller EXE not found' }
+          Get-Item 'dist/Dafan4KEnhancer/Dafan4KEnhancer.exe' | Format-List Name,Length
+          & 'dist/Dafan4KEnhancer/Dafan4KEnhancer.exe' --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Packaged application self-test failed with exit code $LASTEXITCODE" }
+      - name: Package ZIP
+        shell: pwsh
+        run: Compress-Archive -Path 'dist/Dafan4KEnhancer/*' -DestinationPath 'dist/Dafan4KEnhancer-Windows-x64.zip' -CompressionLevel Optimal
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dafan4KEnhancer-Windows-x64
+          path: dist/Dafan4KEnhancer-Windows-x64.zip
+          if-no-files-found: error
+          compression-level: 0
